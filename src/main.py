@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks, Form, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict
 import os
@@ -19,6 +19,9 @@ import asyncio
 import hashlib
 from enum import Enum
 import logging
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from rag import RAGService, process_pdf
 
@@ -29,9 +32,9 @@ ALLOWED_ORIGINS = [
 
 API_KEYS = {
     os.getenv("ADMIN_API_KEY", "your-admin-secret-key"): {"role": "admin", "name": "admin"},
-    os.getenv("USER_API_KEY_1", "your-user-secret-key-1"): {"role": "user", "name": "user_1"},
-    os.getenv("USER_API_KEY_2", "your-user-secret-key-2"): {"role": "user", "name": "user_2"},
-    os.getenv("USER_API_KEY_3", "your-user-secret-key-3"): {"role": "user", "name": "user_3"},
+    os.getenv("USER_API_KEY_1", "your-user-secret-key-1"): {"role": "user", "name": "vercel"},
+    os.getenv("USER_API_KEY_2", "your-user-secret-key-2"): {"role": "user", "name": "dotpmm"},
+    os.getenv("USER_API_KEY_3", "your-user-secret-key-3"): {"role": "user", "name": "beta"},
 }
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -355,16 +358,51 @@ async def process_with_retry(
             except Exception as e:
                 logger.error(f"Failed to delete temp file {file_path}: {e}")
 
-@app.get("/", tags=["Health"])
+@app.get("/", tags=["Dashboard"])
+async def dashboard():
+    html_path = os.path.join(os.path.dirname(__file__), "..", "assets", "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
+
+@app.get("/health", tags=["Health"])
 async def health_check():
-    """Health check with system status"""
+    process = psutil.Process(os.getpid())
+    memory_mb = process.memory_info().rss / 1024 / 1024
+    cpu_percent = process.cpu_percent(interval=0.1) / psutil.cpu_count()
+    uptime_seconds = (datetime.now() - metrics.start_time).total_seconds()
+    
+    all_stats = metrics.get_all_stats()
+    
+    total_calls = sum(user_stats.get('api_calls', 0) for user_stats in all_stats['per_key'].values())
+    total_questions = sum(user_stats.get('questions_asked', 0) for user_stats in all_stats['per_key'].values())
+    
+    per_user = {}
+    for user_name, user_stats in all_stats['per_key'].items():
+        role = 'user'
+        for key, key_info in API_KEYS.items():
+            if key_info['name'] == user_name:
+                role = key_info['role']
+                break
+        
+        per_user[user_name] = {
+            **user_stats,
+            'role': role
+        }
+    
     return {
         "status": "healthy",
         "service": "AskBookie API",
         "version": "2.0.0",
         "rag_initialized": rag_service is not None,
         "active_jobs": job_manager.active_jobs,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "uptime_hours": round(uptime_seconds / 3600, 2),
+        "total_api_calls": total_calls,
+        "total_questions": total_questions,
+        "memory_mb": round(memory_mb, 2),
+        "cpu_percent": round(cpu_percent, 2),
+        "per_user": per_user
     }
 
 @app.post("/embed", tags=["Documents"], status_code=202)
@@ -519,35 +557,6 @@ async def list_jobs(
         "filtered": len(jobs_list),
         "active": job_manager.active_jobs,
         "jobs": dict(sorted_jobs[:limit])
-    }
-
-@app.get("/metrics", tags=["Monitoring"])
-async def get_metrics(
-    user: dict = Depends(verify_api_key)
-):
-    process = psutil.Process(os.getpid())
-    memory_mb = process.memory_info().rss / 1024 / 1024
-    cpu_percent = process.cpu_percent(interval=0.1)
-    
-    if user["role"] == "admin":
-        api_metrics = metrics.get_all_stats()
-    else:
-        api_metrics = {
-            "user": user["name"],
-            "stats": metrics.get_key_stats(user["key"])
-        }
-    
-    return {
-        "api": api_metrics,
-        "system": {
-            "memory_usage_mb": round(memory_mb, 2),
-            "cpu_percent": round(cpu_percent, 2)
-        },
-        "jobs": {
-            "active": job_manager.active_jobs,
-            "total": len(job_manager.jobs),
-            "max_concurrent": MAX_CONCURRENT_JOBS
-        }
     }
 
 @app.delete("/jobs/{job_id}", tags=["Jobs"])

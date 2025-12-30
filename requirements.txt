@@ -8,6 +8,7 @@ langchain-qdrant>=1.1.0
 psutil>=7.2.1
 pydantic>=2.12.5
 pypdf>=6.5.0
+python-dotenv>=1.0.0
 python-multipart>=0.0.21
 qdrant-client>=1.16.2
 sentence-transformers>=5.2.0
