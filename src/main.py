@@ -9,6 +9,7 @@ import sqlite3
 import tempfile
 import atexit
 import re
+import json
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 from contextlib import contextmanager, asynccontextmanager
@@ -108,6 +109,18 @@ def init_database():
                 timestamp REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_metrics_key ON metrics(key_id, endpoint, timestamp);
+            CREATE TABLE IF NOT EXISTS query_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_id TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                query TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                sources TEXT,
+                request_id TEXT,
+                latency_ms REAL,
+                timestamp REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_history_timestamp ON query_history(timestamp);
         """)
 
 init_database()
@@ -254,6 +267,16 @@ def record_metric(key_id: str, endpoint: str, success: bool, latency_ms: float):
         conn.execute(
             "INSERT INTO metrics (key_id, endpoint, success, latency_ms, timestamp) VALUES (?, ?, ?, ?, ?)",
             (key_id, endpoint, 1 if success else 0, latency_ms, time.time())
+        )
+
+def store_query_history(key_id: str, subject: str, query: str, answer: str, 
+                        sources: list, request_id: str, latency_ms: float):
+    with db_transaction() as conn:
+        conn.execute(
+            """INSERT INTO query_history 
+               (key_id, subject, query, answer, sources, request_id, latency_ms, timestamp) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (key_id, subject, query, answer, json.dumps(sources), request_id, latency_ms, time.time())
         )
 
 def get_metrics_summary() -> dict:
@@ -419,6 +442,16 @@ async def ask(request: Request, body: AskRequest, key_id: str = Depends(rate_lim
         rag_service: RAGService = request.app.state.rag_service
         result = rag_service.ask(body.query, subject)
         success = True
+        latency_ms = (time.time() - start_time) * 1000
+        store_query_history(
+            key_id=key_id,
+            subject=subject,
+            query=body.query,
+            answer=result["answer"],
+            sources=result["sources"],
+            request_id=request.state.request_id,
+            latency_ms=latency_ms
+        )
         return {"answer": result["answer"], "sources": result["sources"], "request_id": request.state.request_id}
     except Exception as e:
         logger.exception(f"RAG query failed: {e}")
@@ -547,6 +580,43 @@ async def enable_key(request: Request, target_key_id: str, key_id: str = Depends
     API_KEYS[target_key_id]["active"] = True
     logger.info(f"Key {target_key_id} enabled")
     return {"status": "enabled", "key_id": target_key_id}
+
+@app.get("/history")
+async def get_query_history(
+    request: Request,
+    limit: int = 100,
+    offset: int = 0,
+    key_id: str = Depends(rate_limited("default"))
+):
+    if API_KEYS.get(key_id, {}).get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    with db_transaction() as conn:
+        cursor = conn.execute(
+            """SELECT id, key_id, subject, query, answer, sources, request_id, 
+                      latency_ms, timestamp 
+               FROM query_history 
+               ORDER BY timestamp DESC 
+               LIMIT ? OFFSET ?""",
+            (limit, offset)
+        )
+        history = []
+        for row in cursor.fetchall():
+            history.append({
+                "id": row[0],
+                "key_id": row[1],
+                "subject": row[2],
+                "query": row[3],
+                "answer": row[4],
+                "sources": json.loads(row[5]) if row[5] else [],
+                "request_id": row[6],
+                "latency_ms": row[7],
+                "timestamp": row[8],
+            })
+        
+        total = conn.execute("SELECT COUNT(*) FROM query_history").fetchone()[0]
+    
+    return {"history": history, "total": total, "limit": limit, "offset": offset}
 
 if __name__ == "__main__":
     import uvicorn
