@@ -9,12 +9,10 @@ from qdrant_client.http import models as qdrant_models
 import os
 import uuid
 import time
-import httpx
-import requests
-from typing import Optional, List
+from typing import List
+from g4f.client import Client
 
 PROMPT_TEMPLATE = """
-
     You are AskBookie, an assistant built on a RAG system using university slide data.
 
     Your rules:
@@ -27,95 +25,44 @@ PROMPT_TEMPLATE = """
     {context}
 
     Question: {question}
-    
 """
 
+g4f_client = Client()
 
-def call_puter_api(prompt: str) -> str:
-    url = "https://api.puter.com/v2/chat"
-    payload = {
-        "prompt": prompt,
-        "model": "gemini-3-flash-preview"
-    }
-    headers = {
-        "Content-Type": "application/json"
-    }
-    
-    response = requests.post(url, json=payload, headers=headers, timeout=60)
-    response.raise_for_status()
-    result = response.json()
-    
-    if isinstance(result, dict):
-        return result.get("response", result.get("message", result.get("content", str(result))))
-    return str(result)
+PROMO_PATTERNS = [
+    "want best roleplay experience",
+    "llmplayground.net",
+    "want the best roleplay",
+    "best ai roleplay",
+]
 
+def clean_response(text: str) -> str:
+    lines = text.split('\n')
+    clean_lines = []
+    for line in lines:
+        line_lower = line.lower().strip()
+        if any(pattern in line_lower for pattern in PROMO_PATTERNS):
+            continue
+        if line_lower.startswith("http") and "llmplayground" in line_lower:
+            continue
+        clean_lines.append(line)
+    while clean_lines and not clean_lines[-1].strip():
+        clean_lines.pop()
+    return '\n'.join(clean_lines)
 
-class RAGService:
-    def __init__(self):
-        self.qdrant_url = os.getenv("QDRANT_CLUSTER_URL")
-        self.qdrant_key = os.getenv("QDRANT_API_KEY")
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
+def call_llm(prompt: str) -> str:
+    response = g4f_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        web_search=False
+    )
+    return clean_response(response.choices[0].message.content)
 
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="Alibaba-NLP/gte-modernbert-base",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True}
-        )
-        
-        # Custom httpx client with longer timeout for Windows SSL issues
-        self.client = QdrantClient(
-            url=self.qdrant_url, 
-            api_key=self.qdrant_key,
-            timeout=60
-        )
-
-        # --- OLD GEMINI API (commented out) ---
-        # self.llm = ChatGoogleGenerativeAI(
-        #     model="gemini-2.5-flash", 
-        #     temperature=0,
-        #     google_api_key=self.gemini_key
-        # )
-        
-        self.prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-
-    def ask(self, query_text: str, subject: str):
-        clean_subject = subject.strip().lower().replace(" ", "_")
-        collection_name = f"askbookie_{clean_subject}"
-        
-        vectorstore = QdrantVectorStore(
-            client=self.client,
-            collection_name=collection_name,
-            embedding=self.embeddings
-        )
-
-        results = vectorstore.similarity_search_with_score(
-            query_text, 
-            k=5
-        )
-
-        top_results = results[:3]
-        
-        context_text = "\n\n---\n\n".join([doc.page_content for doc, _ in top_results])
-        
-        # --- OLD GEMINI API CALL (commented out) ---
-        # chain = self.prompt | self.llm
-        # response = chain.invoke({"context": context_text, "question": query_text})
-        # answer = response.content
-        
-        # --- NEW PUTER API CALL ---
-        full_prompt = PROMPT_TEMPLATE.format(context=context_text, question=query_text)
-        answer = call_puter_api(full_prompt)
-        
-        sources = [
-            f"{doc.metadata.get('source', 'Unknown')}: Slide {doc.metadata.get('slide_number', 'Unknown')}" 
-            for doc, _ in top_results
-        ]
-        
-        return {
-            "answer": answer,
-            "sources": sources
-        }
-
+# GEMINI API (uncomment to use instead of g4f)
+# def call_llm_gemini(prompt: str, api_key: str) -> str:
+#     llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0, google_api_key=api_key)
+#     response = llm.invoke(prompt)
+#     return response.content
 
 def get_embedding_function():
     return HuggingFaceEmbeddings(
@@ -123,6 +70,55 @@ def get_embedding_function():
         model_kwargs={'device': 'cpu'},
         encode_kwargs={"normalize_embeddings": True}
     )
+
+
+class RAGService:
+    def __init__(self):
+        self.qdrant_url = os.getenv("QDRANT_CLUSTER_URL")
+        self.qdrant_key = os.getenv("QDRANT_API_KEY")
+        self.gemini_key = os.getenv("GEMINI_API_KEY")
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name="Alibaba-NLP/gte-modernbert-base",
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True}
+        )
+        self.prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+
+    def ask(self, query_text: str, subject: str):
+        clean_subject = subject.strip().lower().replace(" ", "_")
+        collection_name = f"askbookie_{clean_subject}"
+        
+        max_retries = 3
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                client = QdrantClient(url=self.qdrant_url, api_key=self.qdrant_key, timeout=120)
+                vectorstore = QdrantVectorStore(client=client, collection_name=collection_name, embedding=self.embeddings)
+                results = vectorstore.similarity_search_with_score(query_text, k=5)
+                break
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise last_error
+
+        top_results = results[:3]
+        context_text = "\n\n---\n\n".join([doc.page_content for doc, _ in top_results])
+        
+        full_prompt = PROMPT_TEMPLATE.format(context=context_text, question=query_text)
+        answer = call_llm(full_prompt)
+        
+        # GEMINI: uncomment below and comment above to use Gemini instead
+        # answer = call_llm_gemini(full_prompt, self.gemini_key)
+        
+        sources = [
+            f"{doc.metadata.get('source', 'Unknown')}: Slide {doc.metadata.get('slide_number', 'Unknown')}" 
+            for doc, _ in top_results
+        ]
+        
+        return {"answer": answer, "sources": sources}
 
 
 def process_pdf(file_path: str, original_filename: str, subject: str, status_callback=None) -> str:
@@ -133,7 +129,6 @@ def process_pdf(file_path: str, original_filename: str, subject: str, status_cal
         status_callback("processing_started")
 
     docs = load_document(file_path)
-    
     if not docs:
         if status_callback:
             status_callback("failed_no_content")
@@ -143,7 +138,6 @@ def process_pdf(file_path: str, original_filename: str, subject: str, status_cal
         status_callback("chunking")
     
     processed_docs = create_slide_chunks(docs, subject, original_filename)
-    
     if not processed_docs:
         if status_callback:
             status_callback("failed_no_content")
@@ -162,8 +156,7 @@ def process_pdf(file_path: str, original_filename: str, subject: str, status_cal
 
 def load_document(file_path: str) -> List[Document]:
     loader = PyPDFLoader(file_path)
-    docs = loader.load()
-    return docs
+    return loader.load()
 
 
 def create_slide_chunks(raw_docs: List[Document], subject: str, original_filename: str) -> List[Document]:
@@ -182,22 +175,17 @@ def create_slide_chunks(raw_docs: List[Document], subject: str, original_filenam
 
         prev_text = raw_docs[i - 1].page_content if i > 0 else ""
         next_text = raw_docs[i + 1].page_content if i < total - 1 else ""
-
         combined = prev_text + "\n\n" + doc.page_content + "\n\n" + next_text
 
-        unique_id = uuid.uuid4().hex
-
         slide_metadata = {
-            "id": unique_id,
+            "id": uuid.uuid4().hex,
             "page": page_num,
             "slide_number": current_slide_num,
             "source": original_filename,
             "subject": subject
         }
 
-        final_docs.append(
-            Document(page_content=combined, metadata=slide_metadata)
-        )
+        final_docs.append(Document(page_content=combined, metadata=slide_metadata))
 
     return final_docs
 
@@ -205,41 +193,30 @@ def create_slide_chunks(raw_docs: List[Document], subject: str, original_filenam
 def add_to_qdrant(chunks: List[Document], url: str, api_key: str, subject: str):
     clean_subject = subject.strip().lower().replace(" ", "_")
     collection_name = f"askbookie_{clean_subject}"
-
     embedding = get_embedding_function()
-    dim = len(embedding.embed_query("pmm the goat!"))
+    dim = len(embedding.embed_query("test"))
 
     max_retries = 3
     last_error = None
     
     for attempt in range(max_retries):
         try:
-            # Create fresh client on each attempt
             client = QdrantClient(url=url, api_key=api_key, timeout=120)
             
-            # Check/create collection
             if not client.collection_exists(collection_name):
                 client.create_collection(
                     collection_name,
                     vectors_config=qdrant_models.VectorParams(size=dim, distance=qdrant_models.Distance.COSINE)
                 )
 
-            # Create vectorstore and add documents
-            vectorstore = QdrantVectorStore(
-                client=client,
-                collection_name=collection_name,
-                embedding=embedding
-            )
-            
+            vectorstore = QdrantVectorStore(client=client, collection_name=collection_name, embedding=embedding)
             ids = [doc.metadata["id"] for doc in chunks]
             vectorstore.add_documents(chunks, ids=ids)
-            return  # Success!
+            return
             
         except Exception as e:
             last_error = e
             if attempt < max_retries - 1:
-                wait_time = 2 ** (attempt + 1)  # 2, 4, 8 seconds
-                time.sleep(wait_time)
+                time.sleep(2 ** (attempt + 1))
                 continue
             raise last_error
-

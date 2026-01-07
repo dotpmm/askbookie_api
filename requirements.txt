@@ -1,6 +1,7 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 fastapi>=0.128.0
+g4f>=0.4.0
 langchain-community>=0.4.1
 langchain-google-genai>=4.1.2
 langchain-huggingface>=1.2.0
