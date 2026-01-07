@@ -8,6 +8,9 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
 import os
 import uuid
+import time
+import httpx
+import requests
 from typing import Optional, List
 
 PROMPT_TEMPLATE = """
@@ -28,6 +31,25 @@ PROMPT_TEMPLATE = """
 """
 
 
+def call_puter_api(prompt: str) -> str:
+    url = "https://api.puter.com/v2/chat"
+    payload = {
+        "prompt": prompt,
+        "model": "gemini-3-flash-preview"
+    }
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    response = requests.post(url, json=payload, headers=headers, timeout=60)
+    response.raise_for_status()
+    result = response.json()
+    
+    if isinstance(result, dict):
+        return result.get("response", result.get("message", result.get("content", str(result))))
+    return str(result)
+
+
 class RAGService:
     def __init__(self):
         self.qdrant_url = os.getenv("QDRANT_CLUSTER_URL")
@@ -40,13 +62,19 @@ class RAGService:
             encode_kwargs={"normalize_embeddings": True}
         )
         
-        self.client = QdrantClient(url=self.qdrant_url, api_key=self.qdrant_key)
-
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash", 
-            temperature=0,
-            google_api_key=self.gemini_key
+        # Custom httpx client with longer timeout for Windows SSL issues
+        self.client = QdrantClient(
+            url=self.qdrant_url, 
+            api_key=self.qdrant_key,
+            timeout=60
         )
+
+        # --- OLD GEMINI API (commented out) ---
+        # self.llm = ChatGoogleGenerativeAI(
+        #     model="gemini-2.5-flash", 
+        #     temperature=0,
+        #     google_api_key=self.gemini_key
+        # )
         
         self.prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
 
@@ -69,8 +97,14 @@ class RAGService:
         
         context_text = "\n\n---\n\n".join([doc.page_content for doc, _ in top_results])
         
-        chain = self.prompt | self.llm
-        response = chain.invoke({"context": context_text, "question": query_text})
+        # --- OLD GEMINI API CALL (commented out) ---
+        # chain = self.prompt | self.llm
+        # response = chain.invoke({"context": context_text, "question": query_text})
+        # answer = response.content
+        
+        # --- NEW PUTER API CALL ---
+        full_prompt = PROMPT_TEMPLATE.format(context=context_text, question=query_text)
+        answer = call_puter_api(full_prompt)
         
         sources = [
             f"{doc.metadata.get('source', 'Unknown')}: Slide {doc.metadata.get('slide_number', 'Unknown')}" 
@@ -78,7 +112,7 @@ class RAGService:
         ]
         
         return {
-            "answer": response.content,
+            "answer": answer,
             "sources": sources
         }
 
@@ -175,18 +209,37 @@ def add_to_qdrant(chunks: List[Document], url: str, api_key: str, subject: str):
     embedding = get_embedding_function()
     dim = len(embedding.embed_query("pmm the goat!"))
 
-    client = QdrantClient(url=url, api_key=api_key)
-    if not client.collection_exists(collection_name):
-        client.create_collection(
-            collection_name,
-            vectors_config=qdrant_models.VectorParams(size=dim, distance=qdrant_models.Distance.COSINE)
-        )
-
-    vectorstore = QdrantVectorStore(
-        client=client,
-        collection_name=collection_name,
-        embedding=embedding
-    )
+    max_retries = 3
+    last_error = None
     
-    ids = [doc.metadata["id"] for doc in chunks]
-    vectorstore.add_documents(chunks, ids=ids)
+    for attempt in range(max_retries):
+        try:
+            # Create fresh client on each attempt
+            client = QdrantClient(url=url, api_key=api_key, timeout=120)
+            
+            # Check/create collection
+            if not client.collection_exists(collection_name):
+                client.create_collection(
+                    collection_name,
+                    vectors_config=qdrant_models.VectorParams(size=dim, distance=qdrant_models.Distance.COSINE)
+                )
+
+            # Create vectorstore and add documents
+            vectorstore = QdrantVectorStore(
+                client=client,
+                collection_name=collection_name,
+                embedding=embedding
+            )
+            
+            ids = [doc.metadata["id"] for doc in chunks]
+            vectorstore.add_documents(chunks, ids=ids)
+            return  # Success!
+            
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                wait_time = 2 ** (attempt + 1)  # 2, 4, 8 seconds
+                time.sleep(wait_time)
+                continue
+            raise last_error
+

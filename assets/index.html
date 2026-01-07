@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -193,12 +194,14 @@
             body {
                 padding: 1rem;
             }
+
             .grid {
                 grid-template-columns: 1fr;
             }
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
@@ -210,7 +213,7 @@
             <div class="card">
                 <div class="card-label">Uptime</div>
                 <div class="card-value" id="uptime">--</div>
-                <div class="card-desc">hours</div>
+                <div class="card-desc" id="uptime-desc"></div>
             </div>
 
             <div class="card">
@@ -236,12 +239,6 @@
                 <div class="card-value" id="memory">--</div>
                 <div class="card-desc">MB</div>
             </div>
-
-            <div class="card">
-                <div class="card-label">CPU</div>
-                <div class="card-value" id="cpu">--</div>
-                <div class="card-desc">percent</div>
-            </div>
         </div>
 
         <div class="section">
@@ -266,16 +263,31 @@
                 const response = await fetch('/health');
                 const health = await response.json();
 
-                document.getElementById('uptime').textContent = (health.uptime_hours || 0).toFixed(2);
+                // Format uptime as days, hours, mins
+                const hours = health.uptime_hours || 0;
+                const days = Math.floor(hours / 24);
+                const hrs = Math.floor(hours % 24);
+                const mins = Math.floor((hours * 60) % 60);
+
+                if (days > 0) {
+                    document.getElementById('uptime').textContent = days;
+                    document.getElementById('uptime-desc').textContent = `days, ${hrs}h ${mins}m`;
+                } else if (hrs > 0) {
+                    document.getElementById('uptime').textContent = hrs;
+                    document.getElementById('uptime-desc').textContent = `hours, ${mins}m`;
+                } else {
+                    document.getElementById('uptime').textContent = mins;
+                    document.getElementById('uptime-desc').textContent = 'minutes';
+                }
+
                 document.getElementById('active-jobs').textContent = health.active_jobs || 0;
                 document.getElementById('total-calls').textContent = health.total_api_calls || 0;
                 document.getElementById('total-questions').textContent = health.total_questions || 0;
                 document.getElementById('memory').textContent = (health.memory_mb || 0).toFixed(0);
-                document.getElementById('cpu').textContent = (health.cpu_percent || 0).toFixed(1);
 
                 renderUserStats(health.per_user || {});
 
-                document.getElementById('last-update').textContent = 
+                document.getElementById('last-update').textContent =
                     `Updated ${new Date().toLocaleTimeString()}`;
 
             } catch (error) {
@@ -292,7 +304,7 @@
             for (const [userName, stats] of Object.entries(users)) {
                 const userCard = document.createElement('div');
                 userCard.className = 'user-card';
-                
+
                 userCard.innerHTML = `
                     <div class="user-header">
                         <span class="user-name">${userName}</span>
@@ -312,7 +324,7 @@
                             <div class="stat-label">uploads</div>
                         </div>
                         <div class="stat">
-                            <div class="stat-value">${stats.success_rate || 100}%</div>
+                            <div class="stat-value" style="color: ${stats.success_rate < 100 ? '#ef4444' : '#22c55e'}">${stats.success_rate || 100}%</div>
                             <div class="stat-label">success</div>
                         </div>
                         <div class="stat">
@@ -320,8 +332,13 @@
                             <div class="stat-label">latency</div>
                         </div>
                     </div>
+                    ${(stats.ask_fails > 0 || stats.upload_fails > 0) ? `
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #27272a; font-size: 0.75rem; color: #ef4444;">
+                        Failures: ${stats.ask_fails} ask, ${stats.upload_fails} upload
+                    </div>
+                    ` : ''}
                 `;
-                
+
                 container.appendChild(userCard);
             }
         }
@@ -330,4 +347,5 @@
         loadMetrics();
     </script>
 </body>
+
 </html>
