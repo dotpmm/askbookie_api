@@ -381,7 +381,7 @@ async def security_middleware(request: Request, call_next):
     response.headers.update({
         "X-Request-ID": request_id,
         "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "DENY",
+        "X-Frame-Options": "ALLOW-FROM https://huggingface.co",
         "Referrer-Policy": "strict-origin-when-cross-origin",
     })
     duration_ms = round((time.time() - start_time) * 1000, 2)
