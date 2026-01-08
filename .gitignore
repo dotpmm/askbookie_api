@@ -80,3 +80,4 @@ dmypy.json
 *.sqlite
 *.db
 .history/
+test_api.py
