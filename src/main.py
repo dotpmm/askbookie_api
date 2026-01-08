@@ -28,8 +28,8 @@ from rag import RAGService, process_pdf
 
 logging.basicConfig(
     level=logging.INFO,
-    format='{"time":"%(asctime)s","level":"%(levelname)s","msg":"%(message)s"}',
-    datefmt='%Y-%m-%dT%H:%M:%S'
+    format='%(levelname)s:     %(message)s',
+    datefmt='%H:%M:%S'
 )
 logger = logging.getLogger("rag-api")
 
@@ -350,7 +350,7 @@ atexit.register(cleanup_uploads)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting service; upload_dir={UPLOAD_DIR}")
+    logger.info("Starting service")
     app.state.rag_service = RAGService()
     logger.info("RAG service initialized")
     yield
