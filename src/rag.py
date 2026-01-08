@@ -58,7 +58,6 @@ def call_llm(prompt: str) -> str:
     )
     return clean_response(response.choices[0].message.content)
 
-# GEMINI API (uncomment to use instead of g4f)
 # def call_llm_gemini(prompt: str, api_key: str) -> str:
 #     llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0, google_api_key=api_key)
 #     response = llm.invoke(prompt)
@@ -110,7 +109,6 @@ class RAGService:
         full_prompt = PROMPT_TEMPLATE.format(context=context_text, question=query_text)
         answer = call_llm(full_prompt)
         
-        # GEMINI: uncomment below and comment above to use Gemini instead
         # answer = call_llm_gemini(full_prompt, self.gemini_key)
         
         sources = [
