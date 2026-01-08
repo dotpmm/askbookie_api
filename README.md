@@ -59,5 +59,3 @@ USER_API_KEY_3=your-user-key-3
 ## Documentation
 
 Interactive API documentation available at `/docs` when running.
-
-# testing
