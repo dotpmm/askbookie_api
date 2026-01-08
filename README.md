@@ -21,18 +21,36 @@ A production-ready RAG (Retrieval Augmented Generation) API for document Q&A usi
 - **Background Job Processing** - Async PDF processing with automatic retry logic
 - **Admin Controls** - Separate admin and user permissions
 
+## Security Features
+
+- **HMAC-based Authentication** - Time-sensitive HMAC-SHA256 signatures for API authentication
+- **Rate Limiting** - Per-endpoint, per-key rate limits (30/min for /ask, 2/min for /upload)
+- **Auth Lockout** - Automatic IP-based lockout after 5 failed authentication attempts
+- **Constant-Time Comparison** - Timing-safe HMAC verification to prevent timing attacks
+- **Payload Size Limits** - 10MB max file size, 16KB max JSON payload for /ask endpoint
+- **File Validation** - PDF magic number validation, MIME type checking, and file signature verification
+- **Request Tracking** - Unique request IDs for all API calls
+- **Security Headers** - X-Content-Type-Options, X-Frame-Options, Referrer-Policy
+- **API Key Expiry** - Configurable key expiration (90 days default)
+- **Input Sanitization** - Subject name validation and length restrictions on all inputs
+
 ## API Endpoints
 
+### Public Endpoints
 - `GET /` - Dashboard UI
-- `GET /health` - Health check with metrics
-- `POST /upload` - Upload and process PDF documents
-- `POST /ask` - Ask questions about documents
-- `GET /jobs/{job_id}` - Check job status
-- `GET /jobs` - List all jobs for the authenticated user
-- `GET /history` - View query history (admin only)
-- `GET /admin/keys` - List all API keys (admin only)
-- `POST /admin/keys/{key_id}/enable` - Enable an API key (admin only)
-- `POST /admin/keys/{key_id}/disable` - Disable an API key (admin only)
+- `GET /health` - Health check with detailed metrics (uptime, memory usage, per-user stats)
+
+### User Endpoints (Require Authentication)
+- `POST /upload` - Upload and process PDF documents (10MB max, async processing)
+- `POST /ask` - Ask questions about documents (1-20 context documents, configurable)
+- `GET /jobs/{job_id}` - Check upload job status (queued/processing/done/failed)
+- `GET /jobs` - List all jobs for the authenticated user with 24h auto-cleanup
+
+### Admin Endpoints (Admin Role Required)
+- `GET /history` - View query history with pagination (includes answers, sources, latency)
+- `GET /admin/keys` - List all API keys with status and expiration dates
+- `POST /admin/keys/{key_id}/enable` - Enable an API key
+- `POST /admin/keys/{key_id}/disable` - Disable an API key (cannot disable admin key)
 
 ## Environment Variables
 
