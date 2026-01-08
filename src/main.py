@@ -126,9 +126,9 @@ def init_database():
 init_database()
 
 _api_key_configs = [
-    ("service-a", "SERVICE_A_SECRET", "user"),
-    ("service-b", "SERVICE_B_SECRET", "user"),
-    ("service-c", "SERVICE_C_SECRET", "user"),
+    ("askbookie-pesu", "SERVICE_A_SECRET", "user"),
+    ("ask-bookie", "SERVICE_B_SECRET", "user"),
+    ("beta-release", "SERVICE_C_SECRET", "user"),
 ]
 
 API_KEYS = {}
