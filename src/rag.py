@@ -6,11 +6,15 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
+from openai import OpenAI
 import os
 import uuid
 import time
+import logging
+from threading import Lock
 from typing import List
 from g4f.client import Client
+logger = logging.getLogger("rag-api")
 
 PROMPT_TEMPLATE = """
     You are AskBookie, an assistant built on a RAG system using university slide data.
@@ -50,18 +54,108 @@ def clean_response(text: str) -> str:
         clean_lines.pop()
     return '\n'.join(clean_lines)
 
-def call_llm(prompt: str) -> str:
-    response = g4f_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        web_search=False
-    )
-    return clean_response(response.choices[0].message.content)
+MODEL_OPTIONS = {
+    1: {"name": "gemini-flash-primary", "description": "Gemini 2.5 Flash (Primary API Key)"},
+    2: {"name": "gemini-flash-secondary", "description": "Gemini 2.5 Flash (Secondary API Key)"},
+    3: {"name": "gemini-pro", "description": "Gemini 2.5 Pro"},
+    4: {"name": "gpt-4o", "description": "gpt-4o"},
+    5: {"name": "openai", "description": "gpt-5-mini"},
+}
 
-# def call_llm_gemini(prompt: str, api_key: str) -> str:
-#     llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0, google_api_key=api_key)
-#     response = llm.invoke(prompt)
-#     return response.content
+
+class ModelManager:
+    _instance = None
+    _lock = Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialize()
+        return cls._instance
+    
+    def _initialize(self):
+        self._current_model = 1  
+        self._model_lock = Lock()
+        
+        self._gemini_primary_key = os.getenv("GEMINI_API_KEY")
+        self._gemini_secondary_key = os.getenv("GEMINI_2_API_KEY")
+        self._gemini_pro_key = os.getenv("GEMINI_API_KEY")
+        self._openai_key = os.getenv("OPENAI_API_KEY")
+        
+        if self._openai_key:
+            self._openai_client = OpenAI(
+                api_key=self._openai_key,
+                base_url="https://api.chatanywhere.tech/v1"
+            )
+        else:
+            self._openai_client = None
+        
+        logger.info(f"ModelManager initialized with model {self._current_model}")
+    
+    @property
+    def current_model(self) -> int:
+        with self._model_lock:
+            return self._current_model
+    
+    @property
+    def current_model_info(self) -> dict:
+        with self._model_lock:
+            return {
+                "model_id": self._current_model,
+                **MODEL_OPTIONS[self._current_model]
+            }
+    
+    def switch_model(self, model_id: int) -> dict:
+        if model_id not in MODEL_OPTIONS:
+            raise ValueError(f"Invalid model ID: {model_id}. Valid options: 1-5")
+      
+        with self._model_lock:
+            old_model = self._current_model
+            self._current_model = model_id
+            logger.info(f"Model switched from {old_model} to {model_id} ({MODEL_OPTIONS[model_id]['name']})")
+        
+        return self.current_model_info
+    
+    def call_llm(self, prompt: str) -> str:
+        model_id = self.current_model
+        
+        if model_id == 1:
+            return self._call_gemini(prompt, self._gemini_primary_key, "gemini-2.5-flash")
+        elif model_id == 2:
+            return self._call_gemini(prompt, self._gemini_secondary_key, "gemini-2.5-flash")
+        elif model_id == 3:
+            return self._call_gemini(prompt, self._gemini_pro_key, "gemini-2.5-pro")
+        elif model_id == 4:
+            return self._call_gpt4o(prompt)
+        elif model_id == 5:
+            return self._call_openai(prompt)
+    
+    def _call_gemini(self, prompt: str, api_key: str, model: str) -> str:
+        llm = ChatGoogleGenerativeAI(model=model, temperature=0, google_api_key=api_key)
+        response = llm.invoke(prompt)
+        return response.content
+    
+    def _call_gpt4o(self, prompt: str) -> str:
+        response = g4f_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            web_search=False
+        )
+        return clean_response(response.choices[0].message.content)
+    
+    def _call_openai(self, prompt: str) -> str:       
+        response = self._openai_client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return clean_response(response.choices[0].message.content)
+
+model_manager = ModelManager()
+
+def call_llm(prompt: str) -> str:
+    return model_manager.call_llm(prompt)
 
 def get_embedding_function():
     return HuggingFaceEmbeddings(

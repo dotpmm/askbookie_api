@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from rag import RAGService, process_pdf
+from rag import RAGService, process_pdf, model_manager, MODEL_OPTIONS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -618,6 +618,36 @@ async def get_query_history(
     
     return {"history": history, "total": total, "limit": limit, "offset": offset}
 
+class ModelSwitchRequest(BaseModel):
+    model_id: int = Field(..., ge=1, le=5, description="Model ID to switch to (1-5)")
+
+@app.get("/admin/models/current")
+async def get_current_model(request: Request, key_id: str = Depends(rate_limited("default"))):
+    if API_KEYS.get(key_id, {}).get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return model_manager.current_model_info
+
+
+@app.post("/admin/models/switch")
+async def switch_model(
+    request: Request, 
+    body: ModelSwitchRequest, 
+    key_id: str = Depends(rate_limited("default"))
+):
+    if API_KEYS.get(key_id, {}).get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    try:
+        result = model_manager.switch_model(body.model_id)
+        logger.info(f"Admin switched model to {body.model_id}")
+        return {
+            "status": "success",
+            "message": f"Switched to model {body.model_id}",
+            "model": result
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=7860)
