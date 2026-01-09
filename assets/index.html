@@ -239,6 +239,12 @@
                 <div class="card-value" id="memory">--</div>
                 <div class="card-desc">MB</div>
             </div>
+
+            <div class="card">
+                <div class="card-label">Active Model</div>
+                <div class="card-value" id="model-name" style="font-size: 1rem;">--</div>
+                <div class="card-desc" id="model-desc">--</div>
+            </div>
         </div>
 
         <div class="section">
@@ -284,6 +290,11 @@
                 document.getElementById('total-calls').textContent = health.total_api_calls || 0;
                 document.getElementById('total-questions').textContent = health.total_questions || 0;
                 document.getElementById('memory').textContent = (health.memory_mb || 0).toFixed(0);
+
+                if (health.current_model) {
+                    document.getElementById('model-name').textContent = health.current_model.name || '--';
+                    document.getElementById('model-desc').textContent = health.current_model.description || '--';
+                }
 
                 renderUserStats(health.per_user || {});
 

@@ -55,11 +55,11 @@ def clean_response(text: str) -> str:
     return '\n'.join(clean_lines)
 
 MODEL_OPTIONS = {
-    1: {"name": "gemini-flash-primary", "description": "Gemini 2.5 Flash (Primary API Key)"},
-    2: {"name": "gemini-flash-secondary", "description": "Gemini 2.5 Flash (Secondary API Key)"},
-    3: {"name": "gemini-pro", "description": "Gemini 2.5 Pro"},
-    4: {"name": "gpt-4o", "description": "gpt-4o"},
-    5: {"name": "openai", "description": "gpt-5-mini"},
+    1: {"name": "Gemini-3-flash", "description": "Gemini Primary API Key"},
+    2: {"name": "Gemini-3-flash(Back-up)", "description": "Gemini Secondary API Key"},
+    3: {"name": "Gemini-3-Pro", "description": "Gemini Primary API Key"},
+    4: {"name": "GPT-4o", "description": "NOT-OPENAI"},
+    5: {"name": "GPT-5-mini", "description": "OPENAI"},
 }
 
 

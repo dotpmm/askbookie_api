@@ -533,6 +533,7 @@ async def health():
     try:
         metrics = get_metrics_summary()
         metrics["status"] = "healthy"
+        metrics["current_model"] = model_manager.current_model_info
         return metrics
     except Exception:
         logger.exception("Metrics error")
