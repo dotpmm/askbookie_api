@@ -8,6 +8,7 @@ langchain-google-genai>=4.1.2
 langchain-huggingface>=1.2.0
 langchain-qdrant>=1.1.0
 psutil>=7.2.1
+pymongo[srv]>=4.6.0
 pydantic>=2.12.5
 pypdf>=6.5.0
 python-dotenv>=1.0.0

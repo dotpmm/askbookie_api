@@ -197,7 +197,7 @@ class RAGService:
                     continue
                 raise last_error
 
-        top_results = results[:3]
+        top_results = results[:5]
         context_text = "\n\n---\n\n".join([doc.page_content for doc, _ in top_results])
         
         full_prompt = PROMPT_TEMPLATE.format(context=context_text, question=query_text)
