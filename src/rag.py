@@ -58,8 +58,8 @@ MODEL_OPTIONS = {
     1: {"name": "Gemini-3-flash", "description": "Gemini Primary API Key"},
     2: {"name": "Gemini-3-flash(Back-up)", "description": "Gemini Secondary API Key"},
     3: {"name": "Gemini-3-Pro", "description": "Gemini Primary API Key"},
-    4: {"name": "GPT-4o", "description": "NOT-OPENAI"},
-    5: {"name": "GPT-5-mini", "description": "OPENAI"},
+    4: {"name": "GPT-4o-mini", "description": "DuckDuckGo (Free)"},
+    5: {"name": "Claude-3-Haiku", "description": "DuckDuckGo (Free)"},
 }
 
 
@@ -138,17 +138,20 @@ class ModelManager:
         return response.content
     
     def _call_gpt4o(self, prompt: str) -> str:
+        from g4f.Provider import DDG
         response = g4f_client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
+            provider=DDG,
             messages=[{"role": "user", "content": prompt}],
-            web_search=False
         )
         return clean_response(response.choices[0].message.content)
     
-    def _call_openai(self, prompt: str) -> str:       
-        response = self._openai_client.chat.completions.create(
-            model="gpt-5-mini",
-            messages=[{"role": "user", "content": prompt}]
+    def _call_openai(self, prompt: str) -> str:
+        from g4f.Provider import DDG
+        response = g4f_client.chat.completions.create(
+            model="claude-3-haiku",
+            provider=DDG,
+            messages=[{"role": "user", "content": prompt}],
         )
         return clean_response(response.choices[0].message.content)
 
