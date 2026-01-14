@@ -40,6 +40,9 @@ PROMO_PATTERNS = [
     "best ai roleplay",
 ]
 
+class QuotaExhaustedError(Exception):
+    pass
+
 def clean_response(text: str) -> str:
     lines = text.split('\n')
     clean_lines = []
@@ -133,9 +136,16 @@ class ModelManager:
             return self._call_openai(prompt)
     
     def _call_gemini(self, prompt: str, api_key: str, model: str) -> str:
-        llm = ChatGoogleGenerativeAI(model=model, temperature=0, google_api_key=api_key)
-        response = llm.invoke(prompt)
-        return response.content
+        try:
+            llm = ChatGoogleGenerativeAI(model=model, temperature=0, google_api_key=api_key)
+            response = llm.invoke(prompt)
+            return response.content
+        except Exception as e:
+            error_str = str(e).lower()
+            if "429" in str(e) or "quota" in error_str or "resource exhausted" in error_str or "rate limit" in error_str:
+                logger.error(f"Gemini quota exhausted: {e}")
+                raise QuotaExhaustedError("LLM quota exhausted. Please try again later or switch to a different model.")
+            raise
     
     def _call_gpt4o(self, prompt: str) -> str:
         from g4f.Provider import DDG

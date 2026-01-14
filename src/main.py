@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from rag import RAGService, process_pdf, model_manager, MODEL_OPTIONS
+from rag import RAGService, process_pdf, model_manager, MODEL_OPTIONS, QuotaExhaustedError
 import database as db
 
 logging.basicConfig(
@@ -46,9 +46,8 @@ SUBJECT_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 STARTUP_TIME = time.time()
 
 _api_key_configs = [
-    ("askbookie-pesu", "SERVICE_A_SECRET", "user"),
-    ("ask-bookie", "SERVICE_B_SECRET", "user"),
-    ("beta-release", "SERVICE_C_SECRET", "user"),
+    ("askbookie-dev", "API_KEY_1", "user"),
+    ("askbookie-prod", "API_KEY_2", "user"),
 ]
 
 API_KEYS = {}
@@ -175,7 +174,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AskBookie RAG API",
-    version="1.0.0",
+    version="1.2.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -187,8 +186,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:7860",
         "http://127.0.0.1:7860",
-        "https://ask-bookie.vercel.app",
-        "https://askbookie-pesu.vercel.app",
+        "https://askbookie.vercel.app",
     ],
     allow_methods=["GET", "POST"],
     allow_headers=["X-API-Key-Id", "X-API-Signature", "X-API-Timestamp", "Content-Type"],
@@ -270,6 +268,9 @@ async def ask(request: Request, body: AskRequest, key_id: str = Depends(rate_lim
             latency_ms=latency_ms
         )
         return {"answer": result["answer"], "sources": result["sources"], "request_id": request.state.request_id}
+    except QuotaExhaustedError as e:
+        logger.warning(f"LLM quota exhausted: {e}")
+        raise HTTPException(status_code=429, detail="LLM quota exhausted. Try again later or switch model.", headers={"Retry-After": "3600"})
     except Exception as e:
         logger.exception(f"RAG query failed: {e}")
         raise HTTPException(status_code=500, detail="Query failed")
