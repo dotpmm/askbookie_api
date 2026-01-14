@@ -1,3 +1,13 @@
+---
+title: AskBookie API
+emoji: 🔥
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+app_port: 7860
+---
+
 # AskBookie API
 
 Production-grade retrieval-augmented generation service for document-based question answering. The system operates on pre-vectorised document clusters stored in Qdrant, with semantic retrieval feeding into instruction-tuned language model inference.
